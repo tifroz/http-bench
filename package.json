@@ -1,9 +1,13 @@
 {
 	"name": "http-bench",
-	"description": "Simple http benchmarking",
-	"version": "0.0.1",
+	"description": "Simple http benchmarking client run from the command line",
+	"version": "0.0.3",
 	"author": "Hugo <hugo@swishly.com>",
 	"main": "benchmark.js",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tifroz/http-bench"
+	},
 	"bin": {
 		"hb": "./hb.js"
 	},
@@ -13,5 +17,11 @@
 	},
 	"engines": {
 		"node": ">=0.4.4"
-	}
+	},
+	"keywords": [
+		"ab",
+		"benchmark",
+		"performance testing",
+		"scalability testing"
+		],
 }

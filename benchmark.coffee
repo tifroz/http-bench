@@ -14,7 +14,6 @@ program
 	.option('-t, --think <n>', 'Think time (default: 1s)', parseInt, 1)
 	.option('-T, --timeout <n>', 'Request timeout (default: 60s)', parseInt, 60)
 	.option('-d, --duration <n>', 'Test duration excluding ramp-up time and ramp-down times (default: 60s)', parseInt, 60)
-	.option('-c, --concurrency <n>', 'Number of concurrent clients (default: 1)', parseInt, 1)
 	.parse(process.argv)
 
 program.url = url.parse(program.args.pop())
@@ -26,7 +25,7 @@ class Benchmark
 	_clients = []
 	_status = null
 	_pending = 0
-	_results = {errors: 0, successes: []}
+	_results = {errors: [], successes: []}
 	constructor: (@params)->
 			
 		_status = 'started'
@@ -52,7 +51,12 @@ class Benchmark
 		#console.log("#{_pending} pending requests (1 added), #{success.elapsed}ms elapsed")
 		_results.successes.push(success)
 	addError: (error)=>
-		_results.errors += 1
+		err = _.find _results.errors, (e)->_.isEqual(e.instance, error)
+		if err
+			err.count += 1
+		else
+			_results.errors.push({instance: error, count: 1})
+
 	addPending: (client)=>
 		_pending += 1
 		#console.log("#{_pending} pending requests (1 added)")
@@ -62,11 +66,21 @@ class Benchmark
 		if _status is 'stopped' and _pending is 0
 			@printAndExit()
 	printAndExit: =>
-		totalTime = _.reduce _results.successes, ( (m, r)-> m+r.elapsed ), 0
-		console.log("Requests: #{_results.errors+_results.successes.length}")
-		console.log("Errors: #{_results.errors}")
-		if _results.successes.length > 0
-			console.log("Avg Time: #{Math.round(totalTime/_results.successes.length)}")
+		successes = _.sortBy _results.successes, (s)-> s.elapsed
+		errorCount = _.reduce _results.errors, ( (m, e)-> m += e.count ), 0
+		totalTime = _.reduce successes, ( (m, r)-> m+r.elapsed ), 0
+		console.log("Requests: #{errorCount+successes.length}")
+		console.log("Errors: #{errorCount}")
+		for e in _results.errors
+			console.log("\t- #{e.count} occurence(s) of #{util.format('%j',e.instance)}")
+			
+		if successes.length > 0
+			console.log("Average Time: #{Math.round(totalTime/successes.length)}ms")
+			console.log("95 percentile: #{successes[Math.round(successes.length*0.95)].elapsed}ms")
+			console.log("90 percentile: #{successes[Math.round(successes.length*0.90)].elapsed}ms")
+			console.log("80 percentile: #{successes[Math.round(successes.length*0.80)].elapsed}ms")
+			console.log("70 percentile: #{successes[Math.round(successes.length*0.70)].elapsed}ms")
+			console.log("60 percentile: #{successes[Math.round(successes.length*0.60)].elapsed}ms")
 		process.exit(0)
 		
 class BenchClient
@@ -75,8 +89,6 @@ class BenchClient
 	_controller = null
 	
 	constructor: (options, controller)->
-		@_timeout = null
-		@_startedTime = null
 		_reqOptions = 
 				hostname: options.url.hostname
 				port: options.url.port
@@ -92,14 +104,13 @@ class BenchClient
 
 
 	sendRequest: =>
-		@_startedTime = Date.now()
-		
+		startedTime = Date.now()
 		req = _options.protocol.request _reqOptions, (res)=>
 			res.on 'end', =>
-				elapsed = Date.now()-@_startedTime
+				elapsed = Date.now()-startedTime
 				#console.log("elapsed is #{Date.now()}-#{@_startedTime} = #{elapsed}ms" )
 				#console.log("http v #{res.httpVersion}")
-				clearTimeout(@_timeout)
+				clearTimeout(timeout)
 				if res.statusCode isnt 200
 					@handleError(res)
 				else
@@ -107,9 +118,11 @@ class BenchClient
 					_controller.removePending(@)
 				setTimeout @scheduleRequest, _options.think
 		abortRequest = =>
+			clearTimeout(timeout)
 			req.abort()
 			@handleError('timeout')
-		@_timeout = setTimeout abortRequest, _options.timeout
+			setTimeout @scheduleRequest, _options.think
+		timeout = setTimeout abortRequest, _options.timeout
 		req.on 'error', (err)=> @handleError
 		req.end()
 		_controller.addPending(@)

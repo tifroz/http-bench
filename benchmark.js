@@ -36,7 +36,7 @@ Benchmark = (function() {
   _pending = 0;
 
   _results = {
-    errors: 0,
+    errors: [],
     successes: []
   };
 
@@ -93,7 +93,18 @@ Benchmark = (function() {
   };
 
   Benchmark.prototype.addError = function(error) {
-    return _results.errors += 1;
+    var err;
+    err = _.find(_results.errors, function(e) {
+      return _.isEqual(e.instance, error);
+    });
+    if (err) {
+      return err.count += 1;
+    } else {
+      return _results.errors.push({
+        instance: error,
+        count: 1
+      });
+    }
   };
 
   Benchmark.prototype.addPending = function(client) {
@@ -108,14 +119,30 @@ Benchmark = (function() {
   };
 
   Benchmark.prototype.printAndExit = function() {
-    var totalTime;
-    totalTime = _.reduce(_results.successes, (function(m, r) {
+    var e, errorCount, successes, totalTime, _i, _len, _ref;
+    successes = _.sortBy(_results.successes, function(s) {
+      return s.elapsed;
+    });
+    errorCount = _.reduce(_results.errors, (function(m, e) {
+      return m += e.count;
+    }), 0);
+    totalTime = _.reduce(successes, (function(m, r) {
       return m + r.elapsed;
     }), 0);
-    console.log("Requests: " + (_results.errors + _results.successes.length));
-    console.log("Errors: " + _results.errors);
-    if (_results.successes.length > 0) {
-      console.log("Avg Time: " + (Math.round(totalTime / _results.successes.length)));
+    console.log("Requests: " + (errorCount + successes.length));
+    console.log("Errors: " + errorCount);
+    _ref = _results.errors;
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      e = _ref[_i];
+      console.log("\t- " + e.count + " occurence(s) of " + (util.format('%j', e.instance)));
+    }
+    if (successes.length > 0) {
+      console.log("Average Time: " + (Math.round(totalTime / successes.length)) + "ms");
+      console.log("95 percentile: " + successes[Math.round(successes.length * 0.95)].elapsed + "ms");
+      console.log("90 percentile: " + successes[Math.round(successes.length * 0.90)].elapsed + "ms");
+      console.log("80 percentile: " + successes[Math.round(successes.length * 0.80)].elapsed + "ms");
+      console.log("70 percentile: " + successes[Math.round(successes.length * 0.70)].elapsed + "ms");
+      console.log("60 percentile: " + successes[Math.round(successes.length * 0.60)].elapsed + "ms");
     }
     return process.exit(0);
   };
@@ -141,8 +168,6 @@ BenchClient = (function() {
     this.scheduleRequest = __bind(this.scheduleRequest, this);
 
     this.sendRequest = __bind(this.sendRequest, this);
-    this._timeout = null;
-    this._startedTime = null;
     _reqOptions = {
       hostname: options.url.hostname,
       port: options.url.port,
@@ -160,14 +185,14 @@ BenchClient = (function() {
   }
 
   BenchClient.prototype.sendRequest = function() {
-    var abortRequest, req,
+    var abortRequest, req, startedTime, timeout,
       _this = this;
-    this._startedTime = Date.now();
+    startedTime = Date.now();
     req = _options.protocol.request(_reqOptions, function(res) {
       return res.on('end', function() {
         var elapsed;
-        elapsed = Date.now() - _this._startedTime;
-        clearTimeout(_this._timeout);
+        elapsed = Date.now() - startedTime;
+        clearTimeout(timeout);
         if (res.statusCode !== 200) {
           _this.handleError(res);
         } else {
@@ -180,10 +205,11 @@ BenchClient = (function() {
       });
     });
     abortRequest = function() {
+      clearTimeout(timeout);
       req.abort();
       return _this.handleError('timeout');
     };
-    this._timeout = setTimeout(abortRequest, _options.timeout);
+    timeout = setTimeout(abortRequest, _options.timeout);
     req.on('error', function(err) {
       return _this.handleError;
     });
