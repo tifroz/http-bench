@@ -20,9 +20,11 @@ hb [options] <url e.g "http://www.google.com/index.html">
     -t, --think <n>        Think time (default: 1s)
     -T, --timeout <n>      Request timeout (default: 60s)
     -d, --duration <n>     Test duration excluding ramp-up time and ramp-down times (default: 60s)
+    -p, --partials <n>     Print partial results every n seconds (0 to disable  - this is the default)
+    -v, --verbose          Verbose logs (for debugging)
 ```
 
-## Output
+## Output Example
 
 ```
 Requests: 3009

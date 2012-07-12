@@ -12,13 +12,15 @@ program
 	.option('-c, --concurrency <n>', 'Number of concurrent clients (default: 1)', parseInt, 1)
 	.option('-r, --ramp <n>', 'Time to ramp up clients (default: 1s)', parseInt, 1)
 	.option('-t, --think <n>', 'Think time (default: 1s)', parseInt, 1)
-	.option('-T, --timeout <n>', 'Request timeout (default: 60s)', parseInt, 60)
 	.option('-d, --duration <n>', 'Test duration excluding ramp-up time and ramp-down times (default: 60s)', parseInt, 60)
+	.option('-T, --timeout <n>', 'Request timeout (default: 60s)', parseInt, 60)
+	.option('-p, --partials <n>', 'Print partial results every n seconds (0 to disable  - this is the default)', parseInt, 0)
+	.option('-v, --verbose', 'Verbose logs (for debugging)')
 	.parse(process.argv)
 
 program.url = url.parse(program.args.pop())
-
-#console.log(util.format("%j",program))
+if program.verbose
+ console.log(util.format("Options:\n%j\n\n",program))
 
 class Benchmark
 
@@ -26,11 +28,16 @@ class Benchmark
 	_status = null
 	_pending = 0
 	_results = {errors: [], successes: []}
+	_partials = null
 	constructor: (@params)->
 			
 		_status = 'started'
 		for i in [1..@params.concurrency]
 			setTimeout @createClient, Math.round(i*@params.ramp*1000/@params.concurrency)
+		if @params.partials > 0
+			_partials = setInterval @print, @params.partials * 1000
+		process.on("exit", @print)
+		process.on('SIGINT', (->process.exit(1)))
 		
 	createClient: =>
 		try
@@ -42,13 +49,16 @@ class Benchmark
 			console.error(boo)
 	stop:=>
 		_status = 'stopped'
-		#console.log('stopped')
-		if _pending is 0
-			@printAndExit()
+		clearInterval(_partials)
+		if program.verbose
+			console.log('stopped')
+		#if _pending is 0
+		#	process.exit(0)
 	getStatus: =>
 		return _status
 	addSuccess: (success)=>
-		#console.log("#{_pending} pending requests (1 added), #{success.elapsed}ms elapsed")
+		if program.verbose
+			console.log("#{_pending} pending requests (1 added), #{success.elapsed}ms elapsed")
 		_results.successes.push(success)
 	addError: (error)=>
 		err = _.find _results.errors, (e)->_.isEqual(e.instance, error)
@@ -59,13 +69,15 @@ class Benchmark
 
 	addPending: (client)=>
 		_pending += 1
-		#console.log("#{_pending} pending requests (1 added)")
+		if program.verbose
+			console.log("#{_pending} pending requests (1 added)")
 	removePending: (client)=>
 		_pending -= 1
-		#console.log("#{_pending} pending requests (1 removed)")
-		if _status is 'stopped' and _pending is 0
-			@printAndExit()
-	printAndExit: =>
+		if program.verbose
+			console.log("#{_pending} pending requests (1 removed)")
+		#if _status is 'stopped' and _pending is 0
+		#	process.exit(0)
+	print: =>
 		successes = _.sortBy _results.successes, (s)-> s.elapsed
 		errorCount = _.reduce _results.errors, ( (m, e)-> m += e.count ), 0
 		totalTime = _.reduce successes, ( (m, r)-> m+r.elapsed ), 0
@@ -76,11 +88,14 @@ class Benchmark
 			
 		if successes.length > 0
 			console.log("Average Time: #{Math.round(totalTime/successes.length)}ms")
-			console.log("95 percentile: #{successes[Math.round(successes.length*0.95)].elapsed}ms")
-			console.log("90 percentile: #{successes[Math.round(successes.length*0.90)].elapsed}ms")
-			console.log("80 percentile: #{successes[Math.round(successes.length*0.80)].elapsed}ms")
-			console.log("70 percentile: #{successes[Math.round(successes.length*0.70)].elapsed}ms")
-			console.log("60 percentile: #{successes[Math.round(successes.length*0.60)].elapsed}ms")
+			console.log("95 percentile: #{successes[Math.floor(successes.length*0.95)].elapsed}ms")
+			console.log("90 percentile: #{successes[Math.floor(successes.length*0.90)].elapsed}ms")
+			console.log("80 percentile: #{successes[Math.floor(successes.length*0.80)].elapsed}ms")
+			console.log("70 percentile: #{successes[Math.floor(successes.length*0.70)].elapsed}ms")
+			console.log("60 percentile: #{successes[Math.floor(successes.length*0.60)].elapsed}ms")
+		console.log("*********************************\n\n")
+	printAndExit: =>
+		@print()
 		process.exit(0)
 		
 class BenchClient
@@ -108,8 +123,9 @@ class BenchClient
 		req = _options.protocol.request _reqOptions, (res)=>
 			res.on 'end', =>
 				elapsed = Date.now()-startedTime
-				#console.log("elapsed is #{Date.now()}-#{@_startedTime} = #{elapsed}ms" )
-				#console.log("http v #{res.httpVersion}")
+				if program.verbose
+					console.log("elapsed is #{Date.now()}-#{startedTime} = #{elapsed}ms" )
+					console.log("http v #{res.httpVersion}")
 				clearTimeout(timeout)
 				if res.statusCode isnt 200
 					@handleError(res)
@@ -133,7 +149,8 @@ class BenchClient
 			@sendRequest()
 
 	handleError: (err) =>
-		#console.log(err)
+		if program.verbose
+			console.log(err)
 		_controller.removePending(@)
 		_controller.addError(err)
 		

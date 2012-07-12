@@ -20,12 +20,16 @@ process.on('uncaughtException', function(err) {
   return process.exit(1);
 });
 
-program.version('0.0.1').usage('[options] <url e.g "http://www.google.com/index.html">').option('-c, --concurrency <n>', 'Number of concurrent clients (default: 1)', parseInt, 1).option('-r, --ramp <n>', 'Time to ramp up clients (default: 1s)', parseInt, 1).option('-t, --think <n>', 'Think time (default: 1s)', parseInt, 1).option('-T, --timeout <n>', 'Request timeout (default: 60s)', parseInt, 60).option('-d, --duration <n>', 'Test duration excluding ramp-up time and ramp-down times (default: 60s)', parseInt, 60).option('-c, --concurrency <n>', 'Number of concurrent clients (default: 1)', parseInt, 1).parse(process.argv);
+program.version('0.0.1').usage('[options] <url e.g "http://www.google.com/index.html">').option('-p, --partials <n>', 'Print partial results every n seconds (0 to disable  - this is the default)', parseInt, 0).option('-c, --concurrency <n>', 'Number of concurrent clients (default: 1)', parseInt, 1).option('-r, --ramp <n>', 'Time to ramp up clients (default: 1s)', parseInt, 1).option('-t, --think <n>', 'Think time (default: 1s)', parseInt, 1).option('-T, --timeout <n>', 'Request timeout (default: 60s)', parseInt, 60).option('-d, --duration <n>', 'Test duration excluding ramp-up time and ramp-down times (default: 60s)', parseInt, 60).option('-v, --verbose', 'Verbose logs (for debugging)').parse(process.argv);
 
 program.url = url.parse(program.args.pop());
 
+if (program.verbose) {
+  console.log(util.format("Options:\n%j\n\n", program));
+}
+
 Benchmark = (function() {
-  var _clients, _pending, _results, _status;
+  var _clients, _partials, _pending, _results, _status;
 
   Benchmark.name = 'Benchmark';
 
@@ -40,10 +44,14 @@ Benchmark = (function() {
     successes: []
   };
 
+  _partials = null;
+
   function Benchmark(params) {
     var i, _i, _ref;
     this.params = params;
     this.printAndExit = __bind(this.printAndExit, this);
+
+    this.print = __bind(this.print, this);
 
     this.removePending = __bind(this.removePending, this);
 
@@ -63,6 +71,13 @@ Benchmark = (function() {
     for (i = _i = 1, _ref = this.params.concurrency; 1 <= _ref ? _i <= _ref : _i >= _ref; i = 1 <= _ref ? ++_i : --_i) {
       setTimeout(this.createClient, Math.round(i * this.params.ramp * 1000 / this.params.concurrency));
     }
+    if (this.params.partials > 0) {
+      _partials = setInterval(this.print, this.params.partials * 1000);
+    }
+    process.on("exit", this.print);
+    process.on('SIGINT', (function() {
+      return process.exit(1);
+    }));
   }
 
   Benchmark.prototype.createClient = function() {
@@ -79,8 +94,9 @@ Benchmark = (function() {
 
   Benchmark.prototype.stop = function() {
     _status = 'stopped';
-    if (_pending === 0) {
-      return this.printAndExit();
+    clearInterval(_partials);
+    if (program.verbose) {
+      return console.log('stopped');
     }
   };
 
@@ -89,6 +105,9 @@ Benchmark = (function() {
   };
 
   Benchmark.prototype.addSuccess = function(success) {
+    if (program.verbose) {
+      console.log("" + _pending + " pending requests (1 added), " + success.elapsed + "ms elapsed");
+    }
     return _results.successes.push(success);
   };
 
@@ -108,17 +127,20 @@ Benchmark = (function() {
   };
 
   Benchmark.prototype.addPending = function(client) {
-    return _pending += 1;
+    _pending += 1;
+    if (program.verbose) {
+      return console.log("" + _pending + " pending requests (1 added)");
+    }
   };
 
   Benchmark.prototype.removePending = function(client) {
     _pending -= 1;
-    if (_status === 'stopped' && _pending === 0) {
-      return this.printAndExit();
+    if (program.verbose) {
+      return console.log("" + _pending + " pending requests (1 removed)");
     }
   };
 
-  Benchmark.prototype.printAndExit = function() {
+  Benchmark.prototype.print = function() {
     var e, errorCount, successes, totalTime, _i, _len, _ref;
     successes = _.sortBy(_results.successes, function(s) {
       return s.elapsed;
@@ -138,12 +160,17 @@ Benchmark = (function() {
     }
     if (successes.length > 0) {
       console.log("Average Time: " + (Math.round(totalTime / successes.length)) + "ms");
-      console.log("95 percentile: " + successes[Math.round(successes.length * 0.95)].elapsed + "ms");
-      console.log("90 percentile: " + successes[Math.round(successes.length * 0.90)].elapsed + "ms");
-      console.log("80 percentile: " + successes[Math.round(successes.length * 0.80)].elapsed + "ms");
-      console.log("70 percentile: " + successes[Math.round(successes.length * 0.70)].elapsed + "ms");
-      console.log("60 percentile: " + successes[Math.round(successes.length * 0.60)].elapsed + "ms");
+      console.log("95 percentile: " + successes[Math.floor(successes.length * 0.95)].elapsed + "ms");
+      console.log("90 percentile: " + successes[Math.floor(successes.length * 0.90)].elapsed + "ms");
+      console.log("80 percentile: " + successes[Math.floor(successes.length * 0.80)].elapsed + "ms");
+      console.log("70 percentile: " + successes[Math.floor(successes.length * 0.70)].elapsed + "ms");
+      console.log("60 percentile: " + successes[Math.floor(successes.length * 0.60)].elapsed + "ms");
     }
+    return console.log("*********************************\n\n");
+  };
+
+  Benchmark.prototype.printAndExit = function() {
+    this.print();
     return process.exit(0);
   };
 
@@ -192,6 +219,10 @@ BenchClient = (function() {
       return res.on('end', function() {
         var elapsed;
         elapsed = Date.now() - startedTime;
+        if (program.verbose) {
+          console.log("elapsed is " + (Date.now()) + "-" + startedTime + " = " + elapsed + "ms");
+          console.log("http v " + res.httpVersion);
+        }
         clearTimeout(timeout);
         if (res.statusCode !== 200) {
           _this.handleError(res);
@@ -207,7 +238,8 @@ BenchClient = (function() {
     abortRequest = function() {
       clearTimeout(timeout);
       req.abort();
-      return _this.handleError('timeout');
+      _this.handleError('timeout');
+      return setTimeout(_this.scheduleRequest, _options.think);
     };
     timeout = setTimeout(abortRequest, _options.timeout);
     req.on('error', function(err) {
@@ -224,6 +256,9 @@ BenchClient = (function() {
   };
 
   BenchClient.prototype.handleError = function(err) {
+    if (program.verbose) {
+      console.log(err);
+    }
     _controller.removePending(this);
     return _controller.addError(err);
   };

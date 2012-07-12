@@ -1,7 +1,7 @@
 {
 	"name": "http-bench",
 	"description": "Simple http benchmarking client run from the command line",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"author": "Hugo <hugo@swishly.com>",
 	"main": "benchmark.js",
 	"repository": {
